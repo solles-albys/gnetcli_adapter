@@ -6,7 +6,7 @@ build-backend = "flit_core.buildapi"
 name =  "gnetcli_adapter"
 dependencies = [
   "annet",
-  "gnetcli_sdk"
+  "gnetclisdk"
 ]
 authors = [
     {name = "Aleksandr Balezin", email = "gescheit12@gmail.com"},
