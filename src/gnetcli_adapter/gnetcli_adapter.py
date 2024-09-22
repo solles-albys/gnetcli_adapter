@@ -57,8 +57,7 @@ class AppSettings(BaseSettings):
             and value is None
         ):
             return cls.model_fields[info.field_name].get_default()
-        else:
-            return value
+        return value
 
 
 async def get_config(breed: str) -> List[str]:
