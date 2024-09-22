@@ -52,9 +52,9 @@ class AppSettings(BaseSettings):
         # "default" (if defined in "Field") if "None" is informed as "value". That
         # is, "None" is never assumed if passed as a "value".
         if (
-                cls.model_fields[info.field_name].get_default() is not PydanticUndefined
-                and not cls.model_fields[info.field_name].is_required()
-                and value is None
+            cls.model_fields[info.field_name].get_default() is not PydanticUndefined
+            and not cls.model_fields[info.field_name].is_required()
+            and value is None
         ):
             return cls.model_fields[info.field_name].get_default()
         else:
@@ -92,22 +92,25 @@ def run_gnetcli_server():
     global _local_gnetcli_url
     _logger.info("starting gnetcli server")
     try:
-        proc = subprocess.Popen([GNETCLI_SERVER, "--conf-file", "-"],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                stdin=subprocess.PIPE,
-                                bufsize=1,
-                                universal_newlines=True,
-                                )
+        proc = subprocess.Popen(
+            [GNETCLI_SERVER, "--conf-file", "-"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            bufsize=1,
+            universal_newlines=True,
+        )
     except Exception as e:
         logging.exception("server exec error %s", e)
         raise
-    proc.stdin.write("""
+    proc.stdin.write(
+        """
 logging:
   level: debug
   json: true
 port: 0
-    """)
+    """
+    )
     proc.stdin.close()
     _local_gnetcli_p = proc
     while True:
@@ -132,11 +135,14 @@ port: 0
 
 
 class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
-    def __init__(self,
-                 url: Optional[str] = None,
-                 login: Optional[str] = None, password: Optional[str] = None,
-                 dev_login: Optional[str] = None, dev_password: Optional[str] = None,
-                 ):
+    def __init__(
+        self,
+        url: Optional[str] = None,
+        login: Optional[str] = None,
+        password: Optional[str] = None,
+        dev_login: Optional[str] = None,
+        dev_password: Optional[str] = None,
+    ):
         if not url:
             check_gnetcli_server()
             if _local_gnetcli_url is None:
@@ -148,8 +154,12 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                     if _local_gnetcli_url is not None:
                         break
 
-        self.conf = AppSettings(login=login, password=password, dev_login=dev_login, dev_password=dev_password, server=_local_gnetcli_url)
-        auth_token = base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
+        self.conf = AppSettings(
+            login=login, password=password, dev_login=dev_login, dev_password=dev_password, server=_local_gnetcli_url
+        )
+        auth_token = (
+            base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
+        )
         auth_token = f"Basic {auth_token}"
         self.api = Gnetcli(
             server=self.conf.server,
@@ -158,24 +168,24 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
             user_agent="annet",
         )
 
-
     def name(self) -> str:
         return "gnetcli"
 
     def with_config(self, **kwargs: Dict[str, Any]) -> Fetcher:
         return GnetcliFetcher(**kwargs)
 
-    def fetch_packages(self, devices: List[Device],
-                       processes: int = 1, max_slots: int = 0):
+    def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
         if not devices:
             return {}, {}
         raise NotImplementedError()
 
-    def fetch(self, devices: List[Device],
-              files_to_download: Dict[str, List[str]] = None,
-              processes: int = 1,
-              max_slots: int = 0) \
-            -> Tuple[Dict[Device, str], Dict[Device, Any]]:
+    def fetch(
+        self,
+        devices: List[Device],
+        files_to_download: Dict[str, List[str]] = None,
+        processes: int = 1,
+        max_slots: int = 0,
+    ) -> Tuple[Dict[Device, str], Dict[Device, Any]]:
         return asyncio.run(self.afetch(devices=devices))
 
     async def afetch(self, devices: List[Device]):
@@ -204,7 +214,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 host_params=HostParams(
                     credentials=self.conf.make_credentials(),
                     device=device_cls,
-                )
+                ),
             )
             if res.status != 0:
                 raise Exception("cmd error %s" % res)
@@ -213,12 +223,17 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
 
 
 class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
-    def __init__(self,
-                 login: Optional[str] = None, password: Optional[str] = None,
-                 dev_login: Optional[str] = None, dev_password: Optional[str] = None,
-                 ):
+    def __init__(
+        self,
+        login: Optional[str] = None,
+        password: Optional[str] = None,
+        dev_login: Optional[str] = None,
+        dev_password: Optional[str] = None,
+    ):
         self.conf = AppSettings(login=login, password=password, dev_login=dev_login, dev_password=dev_password)
-        auth_token = base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
+        auth_token = (
+            base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
+        )
         auth_token = f"Basic {auth_token}"
         self.api = Gnetcli(
             server=self.conf.server,
@@ -245,19 +260,26 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result = []
             for cmd in cmds:
-                res = await sess.cmd(cmd=cmd.cmd,
-                                     cmd_timeout=cmd.timeout,
-                                     host_params=HostParams(
-                                         credentials=self.conf.make_credentials(),
-                                         device=device_cls,
-                                     ))
+                res = await sess.cmd(
+                    cmd=cmd.cmd,
+                    cmd_timeout=cmd.timeout,
+                    host_params=HostParams(
+                        credentials=self.conf.make_credentials(),
+                        device=device_cls,
+                    ),
+                )
                 if res.status != 0:
                     raise Exception("cmd %s error %s status %s", cmd, res.err, res.status)
                 result.append(res)
             return result
 
-    def apply_deploy_rulebook(self, hw: HardwareView, cmd_paths: Dict[Tuple[str, ...], Dict[str, Any]], do_finalize: bool = True,
-                              do_commit: bool = True):
+    def apply_deploy_rulebook(
+        self,
+        hw: HardwareView,
+        cmd_paths: Dict[Tuple[str, ...], Dict[str, Any]],
+        do_finalize: bool = True,
+        do_commit: bool = True,
+    ):
         res = apply_deploy_rulebook(hw=hw, cmd_paths=cmd_paths, do_finalize=do_finalize, do_commit=do_commit)
         return res
 
