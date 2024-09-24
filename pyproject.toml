@@ -6,7 +6,7 @@ build-backend = "flit_core.buildapi"
 name =  "gnetcli_adapter"
 dependencies = [
   "annet",
-  "gnetclisdk",
+  "gnetclisdk>=1.0.2",
   "pydantic_settings",
   "pydantic"
 ]
@@ -27,6 +27,10 @@ classifiers = [
 ]
 requires-python = ">=3.8.1"
 dynamic = ["version"]
+
+[project.entry-points."annet.adapters"]
+deploy_fetcher = "gnetcli_adapter.gnetcli_adapter:GnetcliFetcher"
+deploy_driver = "gnetcli_adapter.gnetcli_adapter:GnetcliDeployer"
 
 [project.optional-dependencies]
 test = [
@@ -167,7 +171,7 @@ unsafe-load-any-extension="no"
 
 [tool.pylint.'MESSAGES CONTROL']
 enable="c-extension-no-member"
-disable="missing-function-docstring,global-statement,wrong-import-order"
+disable="missing-function-docstring,global-statement,wrong-import-order,missing-class-docstring,too-many-arguments,too-many-positional-arguments"
 
 [tool.pylint.'REPORTS']
 evaluation="10.0 - ((float(5 * error + warning + refactor + convention) / statement) * 10)"
