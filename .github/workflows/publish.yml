@@ -1,4 +1,4 @@
-name: Build and publish Python SDK wheel to pypi
+name: Build and publish wheel to pypi
 
 on:
   release:
