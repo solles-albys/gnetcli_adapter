@@ -171,7 +171,7 @@ unsafe-load-any-extension="no"
 
 [tool.pylint.'MESSAGES CONTROL']
 enable="c-extension-no-member"
-disable="missing-function-docstring,global-statement,wrong-import-order,missing-class-docstring,too-many-arguments,too-many-positional-arguments"
+disable="missing-function-docstring,global-statement,wrong-import-order,missing-class-docstring,too-many-arguments,too-many-positional-arguments,missing-module-docstring"
 
 [tool.pylint.'REPORTS']
 evaluation="10.0 - ((float(5 * error + warning + refactor + convention) / statement) * 10)"
