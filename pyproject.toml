@@ -28,9 +28,11 @@ classifiers = [
 requires-python = ">=3.8.1"
 dynamic = ["version"]
 
-[project.entry-points."annet.adapters"]
-deploy_fetcher = "gnetcli_adapter.gnetcli_adapter:GnetcliFetcher"
-deploy_driver = "gnetcli_adapter.gnetcli_adapter:GnetcliDeployer"
+[project.entry-points."annet.connectors.fetcher"]
+gnetcli = "gnetcli_adapter.gnetcli_adapter:GnetcliFetcher"
+
+[project.entry-points."annet.connectors.deployer"]
+gnetcli = "gnetcli_adapter.gnetcli_adapter:GnetcliDeployer"
 
 [project.optional-dependencies]
 test = [
