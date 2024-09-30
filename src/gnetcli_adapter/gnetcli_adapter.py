@@ -8,7 +8,8 @@ from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
 from annet.rulebook import common
 
-from annet.deploy import Fetcher, AdapterWithConfig, AdapterWithName
+from annet.deploy import Fetcher
+from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
 from gnetclisdk.client import Credentials, Gnetcli, HostParams
@@ -28,8 +29,8 @@ _local_gnetcli_p: Optional[subprocess.Popen] = None
 _local_gnetcli_url: Optional[str] = None
 LOG_FORMAT = "%(asctime)s - l:%(lineno)d - %(funcName)s() - %(levelname)s - %(message)s"
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
+DEFAULT_GNETCLI_SERVER_PATH = "gnetcli_server"
 _logger = logging.getLogger(__name__)
-GNETCLI_SERVER = "/usr/bin/server"
 
 
 class AppSettings(BaseSettings):
@@ -66,10 +67,10 @@ async def get_config(breed: str) -> List[str]:
     raise Exception("unknown breed")
 
 
-def check_gnetcli_server():
+def check_gnetcli_server(server_path: str):
     global _local_gnetcli
     if not _local_gnetcli:
-        t = threading.Thread(target=run_gnetcli_server, args=())
+        t = threading.Thread(target=run_gnetcli_server, args=(server_path,))
         t.daemon = True
         t.start()
         time.sleep(1)
@@ -86,13 +87,13 @@ def cleanup():
 atexit.register(cleanup)
 
 
-def run_gnetcli_server():
+def run_gnetcli_server(server_path: str):
     global _local_gnetcli_p
     global _local_gnetcli_url
     _logger.info("starting gnetcli server")
     try:
         proc = subprocess.Popen(
-            [GNETCLI_SERVER, "--conf-file", "-"],
+            [server_path, "--conf-file", "-"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
@@ -141,9 +142,10 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         password: Optional[str] = None,
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
+        server_path: str = DEFAULT_GNETCLI_SERVER_PATH,
     ):
         if not url:
-            check_gnetcli_server()
+            check_gnetcli_server(server_path=server_path)
             if _local_gnetcli_url is None:
                 _logger.info("waiting for _local_gnetcli_url appears")
                 start = time.monotonic()
