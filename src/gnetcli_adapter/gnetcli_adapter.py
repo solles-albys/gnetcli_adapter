@@ -203,7 +203,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
 
     async def afetch_dev(self, device: Device) -> str:
         if device.breed not in breed_to_device:
-            raise Exception("unknown breed for gnetcli")
+            raise Exception("unknown breed '%s' for gnetcli" % device.breed)
         device_cls = breed_to_device[device.breed]
 
         cmds = await get_config(breed=device.breed)

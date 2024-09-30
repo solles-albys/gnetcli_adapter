@@ -1,0 +1,12 @@
+services:
+  annet:
+    build: annet/
+    command: /tmp/venv/bin/python3 -m annet.annet gen
+    network_mode: host
+    volumes:
+      - type: bind
+        source: ./config.yaml
+        target: /config.yaml
+      - type: bind
+        source: ./my_generators
+        target: /my_generators
