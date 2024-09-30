@@ -14,7 +14,7 @@ class Ifaces(PartialGenerator):
 
         """
 
-    def run_routeros(self, device: Device):
+    def run_routeros(self, _: Device):
         with self.block("ip"):
             with self.block("neighbor"):
                 with self.block("discovery-settings"):
