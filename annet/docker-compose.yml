@@ -1,7 +1,7 @@
 services:
   annet:
     build: annet/
-    command: /tmp/venv/bin/python3 -m annet.annet gen
+    command: tail -f /dev/null
     network_mode: host
     volumes:
       - type: bind
@@ -10,3 +10,6 @@ services:
       - type: bind
         source: ./my_generators
         target: /my_generators
+    environment:
+      - NETBOX_TOKEN=${NETBOX_TOKEN}
+      - NETBOX_URL=${NETBOX_URL}
