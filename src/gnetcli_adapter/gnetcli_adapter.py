@@ -23,6 +23,7 @@ import atexit
 
 breed_to_device = {
     "routeros": "ros",
+    "ios12": "cisco",
 }
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
@@ -64,6 +65,8 @@ class AppSettings(BaseSettings):
 async def get_config(breed: str) -> List[str]:
     if breed == "routeros":
         return ["/export"]
+    elif breed.startswith("ios"):
+        return ["show running-config"]
     raise Exception("unknown breed")
 
 
@@ -202,11 +205,9 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return running, failed_running
 
     async def afetch_dev(self, device: Device) -> str:
-        if device.breed not in breed_to_device:
-            raise Exception("unknown breed '%s' for gnetcli" % device.breed)
-        device_cls = breed_to_device[device.breed]
-
         cmds = await get_config(breed=device.breed)
+        # map annet breed to gnetcli device type
+        gnetcli_device = breed_to_device.get(device.breed, device.breed)
         dev_result = []
         for cmd in cmds:
             res = await self.api.cmd(
@@ -214,7 +215,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 cmd=cmd,
                 host_params=HostParams(
                     credentials=self.conf.make_credentials(),
-                    device=device_cls,
+                    device=gnetcli_device,
                 ),
             )
             if res.status != 0:
