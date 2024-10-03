@@ -225,8 +225,8 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 host_params=HostParams(
                     credentials=self.conf.make_credentials(),
                     device=gnetcli_device,
-                ),
                     ip=ip,
+                ),
             )
             if res.status != 0:
                 raise Exception("cmd error %s" % res)
