@@ -218,6 +218,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         # map annet breed to gnetcli device type
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         dev_result = []
+        ip = get_device_ip(device)
         for cmd in cmds:
             res = await self.api.cmd(
                 hostname=device.fqdn,
