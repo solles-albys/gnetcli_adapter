@@ -6,6 +6,7 @@ import time
 from annet.deploy import DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook
 from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
+from annet.adapters.netbox.common.models import NetboxDevice
 from annet.rulebook import common
 
 from annet.deploy import Fetcher
@@ -88,6 +89,14 @@ def cleanup():
 
 
 atexit.register(cleanup)
+
+
+def get_device_ip(dev: Device) -> Optional[str]:
+    if isinstance(dev, NetboxDevice):
+        for iface in dev.interfaces:
+            for ip in iface.ip_addresses:
+                return ip.address.split("/")[0]
+    return None
 
 
 def run_gnetcli_server(server_path: str):
@@ -216,6 +225,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 host_params=HostParams(
                     credentials=self.conf.make_credentials(),
                     device=gnetcli_device,
+                    ip=ip,
                 ),
             )
             if res.status != 0:
@@ -259,6 +269,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
 
     async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions) -> str:
         device_cls = breed_to_device[device.breed]
+        ip = get_device_ip(device)
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result = []
             for cmd in cmds:
@@ -268,6 +279,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                     host_params=HostParams(
                         credentials=self.conf.make_credentials(),
                         device=device_cls,
+                        ip=ip,
                     ),
                 )
                 if res.status != 0:
