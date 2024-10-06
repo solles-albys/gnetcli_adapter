@@ -166,10 +166,14 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         server_path: Optional[str] = None,
     ):
         self.conf = AppSettings(
-            login=login, password=password, dev_login=dev_login, dev_password=dev_password, server_path=server_path, url=url,
+            login=login,
+            password=password,
+            dev_login=dev_login,
+            dev_password=dev_password,
+            server_path=server_path,
+            url=url,
         )
         self.api = make_api(self.conf)
-
 
     @classmethod
     def name(cls) -> str:
@@ -257,7 +261,14 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         dev_password: Optional[str] = None,
         server_path: Optional[str] = None,
     ):
-        self.conf = AppSettings(login=login, password=password, dev_login=dev_login, dev_password=dev_password, url=url, server_path=server_path)
+        self.conf = AppSettings(
+            login=login,
+            password=password,
+            dev_login=dev_login,
+            dev_password=dev_password,
+            url=url,
+            server_path=server_path,
+        )
         self.api = make_api(self.conf)
 
     @classmethod
