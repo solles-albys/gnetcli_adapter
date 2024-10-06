@@ -14,6 +14,7 @@ from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
 from gnetclisdk.client import Credentials, Gnetcli, HostParams
+import gnetclisdk.proto.server_pb2 as pb
 from pydantic import Field, field_validator, FieldValidationInfo
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,15 +39,23 @@ _logger = logging.getLogger(__name__)
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="gnetcli_", validate_assignment=True)
 
-    server: str = Field(default="localhost:50051")
+    # url: Optional[str] = Field(default="localhost:50051")
+    url: Optional[str] = None
+    server_path: str = DEFAULT_GNETCLI_SERVER_PATH
     insecure_grpc: bool = Field(default=True)
-    login: str = Field(default="")
-    password: str = Field(default="")
-    dev_login: str = Field(default="")
-    dev_password: str = Field(default="")
+    login: Optional[str] = None
+    password: Optional[str] = None
+    dev_login: Optional[str] = None
+    dev_password: Optional[str] = None
 
-    def make_credentials(self) -> Credentials:
+    def make_dev_credentials(self) -> Credentials:
         return Credentials(self.dev_login, self.dev_password)
+
+    def make_server_credentials(self) -> Optional[str]:
+        if self.login and self.password:
+            auth_token = base64.b64encode(b"%s:%s" % (self.login.encode(), self.password.encode())).strip().decode()
+            return f"Basic {auth_token}"
+        return None
 
     @field_validator("*", mode="before")
     @classmethod
@@ -154,38 +163,25 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         password: Optional[str] = None,
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
-        server_path: str = DEFAULT_GNETCLI_SERVER_PATH,
+        server_path: Optional[str] = None,
     ):
-        if not url:
-            check_gnetcli_server(server_path=server_path)
-            if _local_gnetcli_url is None:
-                _logger.info("waiting for _local_gnetcli_url appears")
-                start = time.monotonic()
-                while time.monotonic() - start < 5:
-                    if _local_gnetcli_p is not None and _local_gnetcli_p.returncode is not None:
-                        raise Exception("gnetcli server died with code %s" % _local_gnetcli_p.returncode)
-                    if _local_gnetcli_url is not None:
-                        break
-
         self.conf = AppSettings(
-            login=login, password=password, dev_login=dev_login, dev_password=dev_password, server=_local_gnetcli_url
+            login=login,
+            password=password,
+            dev_login=dev_login,
+            dev_password=dev_password,
+            server_path=server_path,
+            url=url,
         )
-        auth_token = (
-            base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
-        )
-        auth_token = f"Basic {auth_token}"
-        self.api = Gnetcli(
-            server=self.conf.server,
-            auth_token=auth_token,
-            insecure_grpc=self.conf.insecure_grpc,
-            user_agent="annet",
-        )
+        self.api = make_api(self.conf)
 
-    def name(self) -> str:
+    @classmethod
+    def name(cls) -> str:
         return "gnetcli"
 
-    def with_config(self, **kwargs: Dict[str, Any]) -> Fetcher:
-        return GnetcliFetcher(**kwargs)
+    @classmethod
+    def with_config(cls, **kwargs: Dict[str, Any]) -> Fetcher:
+        return cls(**kwargs)
 
     def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
         if not devices:
@@ -224,7 +220,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 hostname=device.fqdn,
                 cmd=cmd,
                 host_params=HostParams(
-                    credentials=self.conf.make_credentials(),
+                    credentials=self.conf.make_dev_credentials(),
                     device=gnetcli_device,
                     ip=ip,
                 ),
@@ -235,30 +231,52 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return b"\n".join(dev_result).decode()
 
 
+def make_api(conf: AppSettings) -> Gnetcli:
+    if not conf.url:
+        check_gnetcli_server(server_path=conf.server_path)
+        if _local_gnetcli_url is None:
+            _logger.info("waiting for _local_gnetcli_url appears")
+            start = time.monotonic()
+            while time.monotonic() - start < 5:
+                if _local_gnetcli_p is not None and _local_gnetcli_p.returncode is not None:
+                    raise Exception("gnetcli server died with code %s" % _local_gnetcli_p.returncode)
+
+    auth_token = conf.make_server_credentials()
+    api = Gnetcli(
+        server=_local_gnetcli_url,
+        auth_token=auth_token,
+        insecure_grpc=conf.insecure_grpc,
+        user_agent="annet",
+    )
+    return api
+
+
 class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
     def __init__(
         self,
+        url: Optional[str] = None,
         login: Optional[str] = None,
         password: Optional[str] = None,
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
+        server_path: Optional[str] = None,
     ):
-        self.conf = AppSettings(login=login, password=password, dev_login=dev_login, dev_password=dev_password)
-        auth_token = (
-            base64.b64encode(b"%s:%s" % (self.conf.login.encode(), self.conf.password.encode())).strip().decode()
+        self.conf = AppSettings(
+            login=login,
+            password=password,
+            dev_login=dev_login,
+            dev_password=dev_password,
+            url=url,
+            server_path=server_path,
         )
-        auth_token = f"Basic {auth_token}"
-        self.api = Gnetcli(
-            server=self.conf.server,
-            auth_token=auth_token,
-            insecure_grpc=self.conf.insecure_grpc,
-            user_agent="annet",
-        )
+        self.api = make_api(self.conf)
 
-    def name(self) -> str:
+    @classmethod
+    def name(cls) -> str:
         return "gnetcli"
 
-    def with_config(self, **kwargs: Dict[str, Any]) -> DeployDriver:
+    @classmethod
+    def with_config(cls, **kwargs: Dict[str, Any]) -> DeployDriver:
         return GnetcliDeployer(**kwargs)
 
     async def bulk_deploy(self, deploy_cmds: Dict[Device, CommandList], args: DeployOptions) -> DeployResult:
@@ -268,23 +286,23 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         res.add_results(results={dev.fqdn: dev_res for (dev, _), dev_res in zip(deploy_items, result)})
         return res
 
-    async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions) -> str:
+    async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions) -> List[pb.CMDResult]:
         device_cls = breed_to_device[device.breed]
         ip = get_device_ip(device)
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
-            result = []
+            result: List[pb.CMDResult] = []
             for cmd in cmds:
                 res = await sess.cmd(
                     cmd=cmd.cmd,
                     cmd_timeout=cmd.timeout,
                     host_params=HostParams(
-                        credentials=self.conf.make_credentials(),
+                        credentials=self.conf.make_dev_credentials(),
                         device=device_cls,
                         ip=ip,
                     ),
                 )
                 if res.status != 0:
-                    raise Exception("cmd %s error %s status %s", cmd, res.err, res.status)
+                    raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                 result.append(res)
             return result
 
