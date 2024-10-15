@@ -3,6 +3,8 @@ import json
 import subprocess
 import time
 
+import annet.annlib.command
+
 from annet.deploy import DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook
 from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
@@ -13,7 +15,7 @@ from annet.deploy import Fetcher
 from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
-from gnetclisdk.client import Credentials, Gnetcli, HostParams
+from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA
 import gnetclisdk.proto.server_pb2 as pb
 from pydantic import Field, field_validator, FieldValidationInfo
 from pydantic_core import PydanticUndefined
@@ -231,6 +233,13 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return b"\n".join(dev_result).decode()
 
 
+def parse_annet_qa(qa: list[annet.annlib.command.Question]) -> list[QA]:
+    res: list[QA] = []
+    for annet_qa in qa:
+        res.append(QA(question=annet_qa.question, answer=annet_qa.answer))
+    return res
+
+
 def make_api(conf: AppSettings) -> Gnetcli:
     if not conf.url:
         check_gnetcli_server(server_path=conf.server_path)
@@ -300,6 +309,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         device=device_cls,
                         ip=ip,
                     ),
+                    qa=parse_annet_qa(cmd.questions),
                 )
                 if res.status != 0:
                     raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
