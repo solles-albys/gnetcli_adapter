@@ -236,7 +236,10 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
 def parse_annet_qa(qa: list[annet.annlib.command.Question]) -> list[QA]:
     res: list[QA] = []
     for annet_qa in qa:
-        res.append(QA(question=annet_qa.question, answer=annet_qa.answer))
+        q = annet_qa.question
+        if annet_qa.is_regexp:
+            q = f"/{annet_qa.question}/"
+        res.append(QA(question=q, answer=annet_qa.answer))
     return res
 
 
