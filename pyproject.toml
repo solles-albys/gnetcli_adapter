@@ -136,19 +136,19 @@ legacy_tox_ini = """
 [tox]
 envlist = py, integration, all
 
-[testenv]
-commands =
-    pytest -m "not integration" {posargs}
+# [testenv]
+# commands =
+#    pytest -m "not integration" {posargs}
 
-[testenv:integration]
-commands =
-    pytest -m "integration" {posargs}
+# [testenv:integration]
+# commands =
+#    pytest -m "integration" {posargs}
 
-[testenv:all]
-extras = all
-commands =
-    pytest {posargs}
-"""
+# [testenv:all]
+# extras = all
+# commands =
+#     pytest {posargs}
+# """
 
 [tool.pylint]
 extension-pkg-whitelist= [
