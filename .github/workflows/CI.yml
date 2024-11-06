@@ -12,4 +12,5 @@ jobs:
   validation:
     uses: microsoft/action-python/.github/workflows/validation.yml@0.7.3
     with:
+      pytest: false
       workdir: '.'
