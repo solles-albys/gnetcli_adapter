@@ -76,7 +76,7 @@ class AppSettings(BaseSettings):
 
 async def get_config(breed: str) -> List[str]:
     if breed == "routeros":
-        return ["/export"]
+        return ["/export verbose", "/user export verbose"]
     elif breed.startswith("ios"):
         return ["show running-config"]
     raise Exception("unknown breed")
