@@ -193,18 +193,25 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
     def fetch(
         self,
         devices: List[Device],
-        files_to_download: Dict[str, List[str]] = None,
+        files_to_download: Optional[Dict[Device, List[str]]] = None,
         processes: int = 1,
         max_slots: int = 0,
     ) -> Tuple[Dict[Device, str], Dict[Device, Any]]:
-        return asyncio.run(self.afetch(devices=devices))
+        return asyncio.run(self.afetch(devices=devices, files_to_download=files_to_download))
 
-    async def afetch(self, devices: List[Device]):
+    async def afetch(self, devices: List[Device], files_to_download: Optional[Dict[Device, List[str]]] = None):
         running = {}
         failed_running = {}
         for device in devices:
             try:
-                dev_res = await self.afetch_dev(device=device)
+                if files_to_download or device.breed == "pc":
+                    if files_to_download:
+                        files =files_to_download.get(device, [])
+                        dev_res = await self.adownload_dev(device=device, files=files)
+                    else:
+                        dev_res = {}
+                else:
+                    dev_res = await self.afetch_dev(device=device)
             except Exception as e:
                 failed_running[device] = e
             else:
@@ -231,6 +238,22 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 raise Exception("cmd error %s" % res)
             dev_result.append(res.out)
         return b"\n".join(dev_result).decode()
+
+    async def adownload_dev(self, device: Device, files: List[str]) -> Dict[str, str]:
+        ip = get_device_ip(device)
+        downloaded = await self.api.download(
+            hostname=device.fqdn,
+            paths=files,
+            host_params=HostParams(
+                credentials=self.conf.make_dev_credentials(),
+                device="pc",
+                ip=ip,
+            ),
+        )
+        res: Dict[str, str] = {}
+        for file, file_data in downloaded.items():
+            res[file] = file_data.content.decode()
+        return res
 
 
 def parse_annet_qa(qa: list[annet.annlib.command.Question]) -> list[QA]:
