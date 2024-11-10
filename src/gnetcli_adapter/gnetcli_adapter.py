@@ -5,13 +5,12 @@ import time
 
 import annet.annlib.command
 
-from annet.deploy import DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook
+from annet.deploy import Fetcher, DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook
 from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
 from annet.adapters.netbox.common.models import NetboxDevice
 from annet.rulebook import common
 
-from annet.deploy import Fetcher, DeployResult
 from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
