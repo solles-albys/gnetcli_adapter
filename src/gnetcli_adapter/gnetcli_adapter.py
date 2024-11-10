@@ -11,11 +11,11 @@ from annet.annlib.netdev.views.hardware import HardwareView
 from annet.adapters.netbox.common.models import NetboxDevice
 from annet.rulebook import common
 
-from annet.deploy import Fetcher
+from annet.deploy import Fetcher, DeployResult
 from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
-from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA
+from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File
 import gnetclisdk.proto.server_pb2 as pb
 from pydantic import Field, field_validator, FieldValidationInfo
 from pydantic_core import PydanticUndefined
@@ -28,6 +28,7 @@ import atexit
 breed_to_device = {
     "routeros": "ros",
     "ios12": "cisco",
+    "pc": "pc",
 }
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
@@ -49,6 +50,7 @@ class AppSettings(BaseSettings):
     password: Optional[str] = None
     dev_login: Optional[str] = None
     dev_password: Optional[str] = None
+    ssh_agent_enabled: bool = True
 
     def make_dev_credentials(self) -> Credentials:
         return Credentials(self.dev_login, self.dev_password)
@@ -113,7 +115,7 @@ def get_device_ip(dev: Device) -> Optional[str]:
 def run_gnetcli_server(server_path: str):
     global _local_gnetcli_p
     global _local_gnetcli_url
-    _logger.info("starting gnetcli server")
+    _logger.info("starting gnetcli server %s", server_path)
     try:
         proc = subprocess.Popen(
             [server_path, "--conf-file", "-"],
@@ -131,6 +133,7 @@ def run_gnetcli_server(server_path: str):
 logging:
   level: debug
   json: true
+dev_use_agent: true
 port: 0
     """
     )
@@ -188,7 +191,8 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
     def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
         if not devices:
             return {}, {}
-        raise NotImplementedError()
+        # TODO: implement fetch_packages
+        return {}, {}
 
     def fetch(
         self,
@@ -294,6 +298,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         password: Optional[str] = None,
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
+        ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
     ):
         self.conf = AppSettings(
@@ -301,6 +306,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             password=password,
             dev_login=dev_login,
             dev_password=dev_password,
+            ssh_agent_enabled=ssh_agent_enabled,
             url=url,
             server_path=server_path,
         )
@@ -322,20 +328,27 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         return res
 
     async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions) -> List[pb.CMDResult]:
-        device_cls = breed_to_device[device.breed]
+        gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
+        host_params = HostParams(
+            credentials=self.conf.make_dev_credentials(),
+            device=gnetcli_device,
+            ip=ip,
+        )
+        if isinstance(cmds, dict):
+            run_cmds = CommandList(Command(cmd) for cmd in cmds["cmds"])
+            files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
+            await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
+        else:
+            run_cmds = cmds
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result: List[pb.CMDResult] = []
-            for cmd in cmds:
+            for cmd in run_cmds:
                 res = await sess.cmd(
                     cmd=cmd.cmd,
                     cmd_timeout=cmd.timeout,
-                    host_params=HostParams(
-                        credentials=self.conf.make_dev_credentials(),
-                        device=device_cls,
-                        ip=ip,
-                    ),
-                    qa=parse_annet_qa(cmd.questions),
+                    host_params=host_params,
+                    qa=parse_annet_qa(cmd.questions or []),
                 )
                 if res.status != 0:
                     raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
