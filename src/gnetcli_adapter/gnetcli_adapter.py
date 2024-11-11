@@ -335,7 +335,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             ip=ip,
         )
         if isinstance(cmds, dict):
-            run_cmds = CommandList(Command(cmd) for cmd in cmds["cmds"])
+            run_cmds = CommandList(Command(cmd) for cmd in cmds["cmds"].values())
             files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
             await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
         else:
