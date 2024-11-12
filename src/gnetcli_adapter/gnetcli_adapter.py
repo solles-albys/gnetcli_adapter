@@ -105,6 +105,8 @@ atexit.register(cleanup)
 
 def get_device_ip(dev: Device) -> Optional[str]:
     if isinstance(dev, NetboxDevice):
+        if dev.primary_ip:
+            return dev.primary_ip.address.split("/")[0]
         for iface in dev.interfaces:
             for ip in iface.ip_addresses:
                 return ip.address.split("/")[0]
