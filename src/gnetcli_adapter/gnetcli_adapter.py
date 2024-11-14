@@ -28,6 +28,7 @@ breed_to_device = {
     "routeros": "ros",
     "ios12": "cisco",
     "pc": "pc",
+    "jun10": "juniper",
 }
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
@@ -80,6 +81,8 @@ async def get_config(breed: str) -> List[str]:
         return ["/export verbose", "/user export verbose"]
     elif breed.startswith("ios"):
         return ["show running-config"]
+    elif breed.startswith("jun"):
+        return ["show configuration"]
     raise Exception("unknown breed")
 
 
