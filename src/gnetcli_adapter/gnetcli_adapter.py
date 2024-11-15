@@ -29,6 +29,7 @@ breed_to_device = {
     "ios12": "cisco",
     "pc": "pc",
     "jun10": "juniper",
+    "eos4": "arista",
 }
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
@@ -83,6 +84,8 @@ async def get_config(breed: str) -> List[str]:
         return ["show running-config"]
     elif breed.startswith("jun"):
         return ["show configuration"]
+    elif breed.startswith("eos4"):
+        return ["show running-config | no-more"]
     raise Exception("unknown breed")
 
 
