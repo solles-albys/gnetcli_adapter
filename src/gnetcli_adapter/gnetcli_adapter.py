@@ -30,6 +30,7 @@ breed_to_device = {
     "pc": "pc",
     "jun10": "juniper",
     "eos4": "arista",
+    "h3c": "h3c",
 }
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
@@ -86,7 +87,9 @@ async def get_config(breed: str) -> List[str]:
         return ["show configuration"]
     elif breed.startswith("eos4"):
         return ["show running-config | no-more"]
-    raise Exception("unknown breed")
+    elif breed.startswith(("h3c", "huawei")):
+        return ["display current-configuration"]
+    raise Exception("unknown breed %r" % breed)
 
 
 def check_gnetcli_server(server_path: str):
@@ -378,6 +381,6 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
 
     def build_exit_cmdlist(self, hw: HardwareView) -> CommandList:
         ret = CommandList()
-        if hw.Huawei:
+        if hw.Huawei or hw.H3C:
             ret.add_cmd(Command("quit", suppress_eof=True))
         return ret
