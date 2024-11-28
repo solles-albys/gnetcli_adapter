@@ -215,7 +215,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         failed_running = {}
         for device in devices:
             try:
-                if files_to_download or device.breed == "pc":
+                if files_to_download or device.is_pc():
                     if files_to_download:
                         files =files_to_download.get(device, [])
                         dev_res = await self.adownload_dev(device=device, files=files)
