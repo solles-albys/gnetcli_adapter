@@ -127,11 +127,11 @@ def get_device_ip(dev: Device) -> Optional[str]:
 def run_gnetcli_server(server_path: str):
     global _local_gnetcli_p
     global _local_gnetcli_url
-    _logger.info("starting gnetcli server %s", server_path)
     abs_path: Optional[str] = shutil.which(server_path)
     if not abs_path and server_path == DEFAULT_GNETCLI_SERVER_PATH:
         abs_path = shutil.which(os.path.expanduser("~/go/bin/gnetcli_server"))
     gnetcli_abs_path: str = abs_path or server_path
+    _logger.info("starting gnetcli server %s", gnetcli_abs_path)
     try:
         proc = subprocess.Popen(
             [gnetcli_abs_path, "--conf-file", "-"],
