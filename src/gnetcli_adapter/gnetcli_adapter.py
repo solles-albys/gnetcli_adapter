@@ -30,6 +30,7 @@ breed_to_device = {
     "routeros": "ros",
     "ios12": "cisco",
     "pc": "pc",
+    "cuml2": "pc",
     "jun10": "juniper",
     "eos4": "arista",
     "h3c": "h3c",
