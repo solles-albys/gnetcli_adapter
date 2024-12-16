@@ -34,6 +34,16 @@ breed_to_device = {
     "eos4": "arista",
     "h3c": "h3c",
 }
+
+DEFAULT_GNETCLI_SERVER_CONF = """
+logging:
+  level: debug
+  json: true
+dev_use_agent: true
+port: 0
+
+"""
+
 _local_gnetcli: Optional[threading.Thread] = None
 _local_gnetcli_p: Optional[subprocess.Popen] = None
 _local_gnetcli_url: Optional[str] = None
@@ -49,6 +59,7 @@ class AppSettings(BaseSettings):
     # url: Optional[str] = Field(default="localhost:50051")
     url: Optional[str] = None
     server_path: str = DEFAULT_GNETCLI_SERVER_PATH
+    server_conf: str = DEFAULT_GNETCLI_SERVER_CONF
     insecure_grpc: bool = Field(default=True)
     login: Optional[str] = None
     password: Optional[str] = None
@@ -94,10 +105,11 @@ async def get_config(breed: str) -> List[str]:
     raise Exception("unknown breed %r" % breed)
 
 
-def check_gnetcli_server(server_path: str):
+def check_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CONF):
     global _local_gnetcli
     if not _local_gnetcli:
-        t = threading.Thread(target=run_gnetcli_server, args=(server_path,))
+        t = threading.Thread(target=run_gnetcli_server,
+                             kwargs={"server_path": server_path, "config": config})
         t.daemon = True
         t.start()
         time.sleep(1)
@@ -124,7 +136,7 @@ def get_device_ip(dev: Device) -> Optional[str]:
     return None
 
 
-def run_gnetcli_server(server_path: str):
+def run_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CONF):
     global _local_gnetcli_p
     global _local_gnetcli_url
     abs_path: Optional[str] = shutil.which(server_path)
@@ -144,15 +156,7 @@ def run_gnetcli_server(server_path: str):
     except Exception as e:
         logging.exception("server exec error %s", e)
         raise
-    proc.stdin.write(
-        """
-logging:
-  level: debug
-  json: true
-dev_use_agent: true
-port: 0
-    """
-    )
+    proc.stdin.write(config)
     proc.stdin.close()
     _local_gnetcli_p = proc
     while True:
@@ -288,7 +292,7 @@ def parse_annet_qa(qa: list[annet.annlib.command.Question]) -> list[QA]:
 
 def make_api(conf: AppSettings) -> Gnetcli:
     if not conf.url:
-        check_gnetcli_server(server_path=conf.server_path)
+        check_gnetcli_server(server_path=conf.server_path, config=conf.server_conf)
         if _local_gnetcli_url is None:
             _logger.info("waiting for _local_gnetcli_url appears")
             start = time.monotonic()
@@ -316,6 +320,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         dev_password: Optional[str] = None,
         ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
+        server_conf: Optional[str] = None,
     ):
         self.conf = AppSettings(
             login=login,
@@ -325,6 +330,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             ssh_agent_enabled=ssh_agent_enabled,
             url=url,
             server_path=server_path,
+            server_conf=server_conf,
         )
         self.api = make_api(self.conf)
 
