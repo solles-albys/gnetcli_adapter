@@ -190,6 +190,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
         server_path: Optional[str] = None,
+        server_conf: str = DEFAULT_GNETCLI_SERVER_CONF,
     ):
         self.conf = AppSettings(
             login=login,
@@ -198,6 +199,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
             dev_password=dev_password,
             server_path=server_path,
             url=url,
+            server_conf=server_conf,
         )
         self.api = make_api(self.conf)
 
