@@ -34,6 +34,8 @@ breed_to_device = {
     "jun10": "juniper",
     "eos4": "arista",
     "h3c": "h3c",
+    "vrp85": "huawei",
+    "vrp55": "huawei",
 }
 
 DEFAULT_GNETCLI_SERVER_CONF = """
@@ -101,7 +103,7 @@ async def get_config(breed: str) -> List[str]:
         return ["show configuration"]
     elif breed.startswith("eos4"):
         return ["show running-config | no-more"]
-    elif breed.startswith(("h3c", "huawei")):
+    elif breed.startswith(("h3c", "vrp")):
         return ["display current-configuration"]
     raise Exception("unknown breed %r" % breed)
 
