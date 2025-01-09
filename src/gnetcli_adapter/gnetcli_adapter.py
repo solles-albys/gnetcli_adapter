@@ -59,7 +59,6 @@ _logger = logging.getLogger(__name__)
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="gnetcli_", validate_assignment=True)
 
-    # url: Optional[str] = Field(default="localhost:50051")
     url: Optional[str] = None
     server_path: str = DEFAULT_GNETCLI_SERVER_PATH
     server_conf: str = DEFAULT_GNETCLI_SERVER_CONF
@@ -191,18 +190,21 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         password: Optional[str] = None,
         dev_login: Optional[str] = None,
         dev_password: Optional[str] = None,
+        ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
         server_conf: str = DEFAULT_GNETCLI_SERVER_CONF,
     ):
-        self.conf = AppSettings(
-            login=login,
-            password=password,
-            dev_login=dev_login,
-            dev_password=dev_password,
-            server_path=server_path,
-            url=url,
-            server_conf=server_conf,
-        )
+        conf_args = {
+            "login": login,
+            "password": password,
+            "dev_login": dev_login,
+            "dev_password": dev_password,
+            "server_path": server_path,
+            "url": url,
+            "server_conf": server_conf,
+            "ssh_agent_enabled": ssh_agent_enabled,
+        }
+        self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
 
     @classmethod
@@ -327,16 +329,17 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         server_path: Optional[str] = None,
         server_conf: Optional[str] = None,
     ):
-        self.conf = AppSettings(
-            login=login,
-            password=password,
-            dev_login=dev_login,
-            dev_password=dev_password,
-            ssh_agent_enabled=ssh_agent_enabled,
-            url=url,
-            server_path=server_path,
-            server_conf=server_conf,
-        )
+        conf_args = {
+            "login": login,
+            "password": password,
+            "dev_login": dev_login,
+            "dev_password": dev_password,
+            "server_path": server_path,
+            "url": url,
+            "server_conf": server_conf,
+            "ssh_agent_enabled": ssh_agent_enabled,
+        }
+        self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
 
     @classmethod
