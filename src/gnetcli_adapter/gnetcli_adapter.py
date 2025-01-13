@@ -69,7 +69,9 @@ class AppSettings(BaseSettings):
     dev_password: Optional[str] = None
     ssh_agent_enabled: bool = True
 
-    def make_dev_credentials(self) -> Credentials:
+    def make_dev_credentials(self) -> Optional[Credentials]:
+        if not self.dev_login and not self.dev_password:
+            return None
         return Credentials(self.dev_login, self.dev_password)
 
     def make_server_credentials(self) -> Optional[str]:
