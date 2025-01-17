@@ -42,8 +42,10 @@ DEFAULT_GNETCLI_SERVER_CONF = """
 logging:
   level: debug
   json: true
-dev_use_agent: true
 port: 0
+dev_auth:
+  use_agent: true
+  ssh_config: true
 
 """
 
@@ -329,7 +331,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         dev_password: Optional[str] = None,
         ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
-        server_conf: Optional[str] = None,
+        server_conf: Optional[str] = DEFAULT_GNETCLI_SERVER_CONF,
     ):
         conf_args = {
             "login": login,
