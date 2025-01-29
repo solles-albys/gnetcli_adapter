@@ -29,6 +29,7 @@ import os.path
 breed_to_device = {
     "routeros": "ros",
     "ios12": "cisco",
+    "bcom-os": "bcomos",
     "pc": "pc",
     "cuml2": "pc",
     "jun10": "juniper",
@@ -100,7 +101,7 @@ class AppSettings(BaseSettings):
 async def get_config(breed: str) -> List[str]:
     if breed == "routeros":
         return ["/export verbose", "/user export verbose"]
-    elif breed.startswith("ios"):
+    elif breed.startswith("ios") or breed.startswith("bcom"):
         return ["show running-config"]
     elif breed.startswith("jun"):
         return ["show configuration"]
@@ -302,6 +303,7 @@ def parse_annet_qa(qa: list[annet.annlib.command.Question]) -> list[QA]:
 
 
 def make_api(conf: AppSettings) -> Gnetcli:
+    gnetcli_url = _local_gnetcli_url
     if not conf.url:
         check_gnetcli_server(server_path=conf.server_path, config=conf.server_conf)
         if _local_gnetcli_url is None:
@@ -310,10 +312,11 @@ def make_api(conf: AppSettings) -> Gnetcli:
             while time.monotonic() - start < 5:
                 if _local_gnetcli_p is not None and _local_gnetcli_p.returncode is not None:
                     raise Exception("gnetcli server died with code %s" % _local_gnetcli_p.returncode)
-
+    else:
+        gnetcli_url = conf.url
     auth_token = conf.make_server_credentials()
     api = Gnetcli(
-        server=_local_gnetcli_url,
+        server=gnetcli_url,
         auth_token=auth_token,
         insecure_grpc=conf.insecure_grpc,
         user_agent="annet",
