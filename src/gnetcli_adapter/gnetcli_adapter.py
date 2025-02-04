@@ -372,15 +372,13 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         )
         do_reload: bool = args.entire_reload.value == "yes"
         seen_exc: list[Exception] = []
-        suppress_nonzero = False
         reload_cmds: dict[str, CommandList] = {}
         total_cmds = 0
         if isinstance(cmds, dict): # PC
-            suppress_nonzero = True
             for file, cmd in cmds["cmds"].items():
                 if isinstance(cmd, bytes):
                     cmd = cmd.decode()
-                reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=suppress_nonzero) for cmd in cmd.splitlines()])
+                reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=True) for cmd in cmd.splitlines()])
                 total_cmds += len(reload_cmds[file])
             run_cmds = CommandList()
             files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
@@ -428,10 +426,15 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                             if progress_bar:
                                 progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
                             if cmd.suppress_nonzero:
+                                done_cmds += 1
                                 seen_exc.append(Exception("cmd %s error %s status %s", cmd, res.error, res.status))
                                 break # break on command for current file
                             raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                         result.append(res)
+                if progress_bar:
+                    progress_bar.set_progress(device.fqdn, total_cmds, total_cmds)
+            if seen_exc and progress_bar:
+                progress_bar.set_exception(device.fqdn, "seen exception", str(seen_exc), total_cmds)
             return seen_exc, result
 
     def apply_deploy_rulebook(
