@@ -409,7 +409,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                     progress_bar.set_progress(device.fqdn, len(cmds), total_cmds)
             if do_reload:
                 for file, cmds in reload_cmds.items():
-                    _logger.debug("reload %s", file, cmds)
+                    _logger.debug("reload %s %s", file, cmds)
                     for cmd in cmds:
                         if progress_bar:
                             progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=f"{file}:{cmd.cmd}")
