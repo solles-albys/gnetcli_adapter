@@ -5,7 +5,7 @@ import time
 
 import annet.annlib.command
 
-from annet.deploy import Fetcher, DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook
+from annet.deploy import Fetcher, DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook, ProgressBar
 from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
 from annet.adapters.netbox.common.models import NetboxDevice
@@ -220,22 +220,17 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
     def with_config(cls, **kwargs: Dict[str, Any]) -> Fetcher:
         return cls(**kwargs)
 
-    def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
+    async def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
         if not devices:
             return {}, {}
         # TODO: implement fetch_packages
         return {}, {}
 
-    def fetch(
-        self,
-        devices: List[Device],
-        files_to_download: Optional[Dict[Device, List[str]]] = None,
-        processes: int = 1,
-        max_slots: int = 0,
-    ) -> Tuple[Dict[Device, str], Dict[Device, Any]]:
-        return asyncio.run(self.afetch(devices=devices, files_to_download=files_to_download))
-
-    async def afetch(self, devices: List[Device], files_to_download: Optional[Dict[Device, List[str]]] = None):
+    async def fetch(self,
+                    devices: List[Device],
+                    files_to_download: Optional[Dict[Device, List[str]]] = None,
+                    processes: int = 1,
+        max_slots: int = 0,):
         running = {}
         failed_running = {}
         for device in devices:
@@ -357,14 +352,17 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
     def with_config(cls, **kwargs: Dict[str, Any]) -> DeployDriver:
         return GnetcliDeployer(**kwargs)
 
-    async def bulk_deploy(self, deploy_cmds: Dict[Device, CommandList], args: DeployOptions) -> DeployResult:
+    async def bulk_deploy(self, deploy_cmds: dict[Device, CommandList], args: DeployOptions, progress_bar: ProgressBar | None = None) -> DeployResult:
+        if progress_bar:
+            for host, cmds in deploy_cmds.items():
+                progress_bar.set_progress(host.fqdn, 0, len(cmds))
         deploy_items = deploy_cmds.items()
-        result = await asyncio.gather(*[asyncio.Task(self.deploy(device, cmds, args)) for device, cmds in deploy_items])
+        result = await asyncio.gather(*[asyncio.Task(self.deploy(device, cmds, args, progress_bar)) for device, cmds in deploy_items])
         res = DeployResult(hostnames=[], results={}, durations={}, original_states={})
         res.add_results(results={dev.fqdn: dev_res for (dev, _), dev_res in zip(deploy_items, result)})
         return res
 
-    async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions) -> List[pb.CMDResult]:
+    async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions, progress_bar: ProgressBar | None = None) -> tuple[list[Exception], list[pb.CMDResult]]:
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
         host_params = HostParams(
@@ -372,12 +370,24 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             device=gnetcli_device,
             ip=ip,
         )
-        if isinstance(cmds, dict):
-            run_cmds = CommandList(Command(cmd) for cmd in cmds["cmds"].values())
+        do_reload: bool = args.entire_reload.value == "yes"
+        seen_exc: list[Exception] = []
+        reload_cmds: dict[str, CommandList] = {}
+        total_cmds = 0
+        if isinstance(cmds, dict): # PC
+            for file, cmd in cmds["cmds"].items():
+                if isinstance(cmd, bytes):
+                    cmd = cmd.decode()
+                reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=True) for cmd in cmd.splitlines()])
+                total_cmds += len(reload_cmds[file])
+            run_cmds = CommandList()
             files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
             await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
         else:
+            total_cmds = len(cmds)
             run_cmds = cmds
+
+        done_cmds = 0
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result: List[pb.CMDResult] = []
             for cmd in run_cmds:
@@ -387,10 +397,45 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                     host_params=host_params,
                     qa=parse_annet_qa(cmd.questions or []),
                 )
+                done_cmds += 1
                 if res.status != 0:
+                    if cmd.suppress_nonzero:
+                        continue
+                    if progress_bar:
+                        progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
                     raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                 result.append(res)
-            return result
+                if progress_bar:
+                    progress_bar.set_progress(device.fqdn, len(cmds), total_cmds)
+            if do_reload:
+                for file, cmds in reload_cmds.items():
+                    _logger.debug("reload %s", file, cmds)
+                    for cmd in cmds:
+                        if progress_bar:
+                            progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=f"{file}:{cmd.cmd}")
+                        res = await sess.cmd(
+                            cmd=cmd.cmd,
+                            cmd_timeout=cmd.timeout,
+                            host_params=host_params,
+                            qa=parse_annet_qa(cmd.questions or []),
+                        )
+                        done_cmds += 1
+                        if progress_bar:
+                            progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}")
+                        if res.status != 0 and cmd.suppress_nonzero:
+                            if progress_bar:
+                                progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
+                            if cmd.suppress_nonzero:
+                                done_cmds += 1
+                                seen_exc.append(Exception("cmd %s error %s status %s", cmd, res.error, res.status))
+                                break # break on command for current file
+                            raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
+                        result.append(res)
+                if progress_bar:
+                    progress_bar.set_progress(device.fqdn, total_cmds, total_cmds)
+            if seen_exc and progress_bar:
+                progress_bar.set_exception(device.fqdn, "seen exception", str(seen_exc), total_cmds)
+            return seen_exc, result
 
     def apply_deploy_rulebook(
         self,
