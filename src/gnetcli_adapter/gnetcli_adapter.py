@@ -319,6 +319,16 @@ def make_api(conf: AppSettings) -> Gnetcli:
     )
     return api
 
+def format_trace(trace: list[pb.CMDTraceItem]) -> str:
+    res:list[str] = []
+    for t in trace:
+        op = "unknown" # TODO: get from pb
+        if t.operation == 2:
+            op = "write"
+        elif t.operation == 3:
+            op = "read"
+        res.append(f"{op}={t.data}")
+    return "\n".join(res)
 
 class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
     def __init__(
@@ -392,12 +402,18 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result: List[pb.CMDResult] = []
             for cmd in run_cmds:
+                if progress_bar:
+                    progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=cmd.cmd)
                 res = await sess.cmd(
                     cmd=cmd.cmd,
                     cmd_timeout=cmd.timeout,
                     host_params=host_params,
                     qa=parse_annet_qa(cmd.questions or []),
+                    trace=True,
                 )
+                if progress_bar:
+                    tr = format_trace(res.trace)
+                    progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}\n{tr}")
                 done_cmds += 1
                 if res.status != 0:
                     if cmd.suppress_nonzero:
@@ -407,7 +423,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                     raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                 result.append(res)
                 if progress_bar:
-                    progress_bar.set_progress(device.fqdn, len(cmds), total_cmds)
+                    progress_bar.set_progress(device.fqdn, done_cmds, total_cmds)
             if do_reload:
                 for file, cmds in reload_cmds.items():
                     _logger.debug("reload %s %s", file, cmds)
