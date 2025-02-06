@@ -15,6 +15,7 @@ from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
 from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File
+from gnetclisdk.exceptions import EOFError
 import gnetclisdk.proto.server_pb2 as pb
 from pydantic import Field, field_validator, FieldValidationInfo
 from pydantic_core import PydanticUndefined
@@ -404,13 +405,21 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             for cmd in run_cmds:
                 if progress_bar:
                     progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=cmd.cmd)
-                res = await sess.cmd(
-                    cmd=cmd.cmd,
-                    cmd_timeout=cmd.timeout,
-                    host_params=host_params,
-                    qa=parse_annet_qa(cmd.questions or []),
-                    trace=True,
-                )
+                try:
+                    res = await sess.cmd(
+                        cmd=cmd.cmd,
+                        cmd_timeout=cmd.timeout,
+                        host_params=host_params,
+                        qa=parse_annet_qa(cmd.questions or []),
+                        trace=True,
+                    )
+                    time.sleep(1)
+                except EOFError as e:
+                    if cmd.suppress_eof:
+                        if progress_bar:
+                            progress_bar.set_progress(device.fqdn, total_cmds, total_cmds, suffix=f"suppressed EOF: {cmd.cmd}")
+                        break  # we can't exec subsequent cmds
+                    raise e
                 if progress_bar:
                     tr = format_trace(res.trace)
                     progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}\n{tr}")
@@ -448,7 +457,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                                 break # break on command for current file
                             raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                         result.append(res)
-                if progress_bar:
+                if reload_cmds and progress_bar:
                     progress_bar.set_progress(device.fqdn, total_cmds, total_cmds)
             if seen_exc and progress_bar:
                 progress_bar.set_exception(device.fqdn, "seen exception", str(seen_exc), total_cmds)
