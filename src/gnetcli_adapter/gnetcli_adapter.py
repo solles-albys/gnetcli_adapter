@@ -307,6 +307,7 @@ def make_api(conf: AppSettings) -> Gnetcli:
             while time.monotonic() - start < 5:
                 if _local_gnetcli_p is not None and _local_gnetcli_p.returncode is not None:
                     raise Exception("gnetcli server died with code %s" % _local_gnetcli_p.returncode)
+        gnetcli_url = _local_gnetcli_url
     else:
         gnetcli_url = conf.url
     auth_token = conf.make_server_credentials()
