@@ -413,7 +413,6 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         qa=parse_annet_qa(cmd.questions or []),
                         trace=True,
                     )
-                    time.sleep(1)
                 except EOFError as e:
                     if cmd.suppress_eof:
                         if progress_bar:
