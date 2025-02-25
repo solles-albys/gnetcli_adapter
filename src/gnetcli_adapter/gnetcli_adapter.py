@@ -231,23 +231,34 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                     devices: List[Device],
                     files_to_download: Optional[Dict[Device, List[str]]] = None,
                     processes: int = 1,
-        max_slots: int = 0,):
+                    max_slots: int = 0,
+    ):
         running = {}
         failed_running = {}
+
+        tasks = {}
         for device in devices:
-            try:
-                if files_to_download or device.is_pc():
-                    if files_to_download:
-                        files =files_to_download.get(device, [])
-                        dev_res = await self.adownload_dev(device=device, files=files)
-                    else:
-                        dev_res = {}
+            if files_to_download or device.is_pc():
+                if files_to_download:
+                    files = files_to_download.get(device, [])
+                    task = asyncio.create_task(self.adownload_dev(device=device, files=files))
+                    tasks[task] = device
                 else:
-                    dev_res = await self.afetch_dev(device=device)
-            except Exception as e:
-                failed_running[device] = e
+                    running[device] = {}
             else:
-                running[device] = dev_res
+                task = asyncio.create_task(self.afetch_dev(device=device))
+                tasks[task] = device
+
+        if not tasks:
+            return running, failed_running
+
+        done, pending = await asyncio.wait(list(tasks), return_when=asyncio.ALL_COMPLETED)
+        for task in done:
+            device = tasks[task]
+            if (exc := task.exception()) is not None:
+                failed_running[device] = exc
+            else:
+                running[device] = task.result()
         return running, failed_running
 
     async def afetch_dev(self, device: Device) -> str:
