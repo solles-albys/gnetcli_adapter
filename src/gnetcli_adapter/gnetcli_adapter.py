@@ -33,6 +33,7 @@ breed_to_device = {
     "bcom-os": "bcomos",
     "pc": "pc",
     "cuml2": "pc",
+    "moxa": "pc",
     "jun10": "juniper",
     "eos4": "arista",
     "h3c": "h3c",
@@ -283,13 +284,14 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return b"\n".join(dev_result).decode()
 
     async def adownload_dev(self, device: Device, files: List[str]) -> Dict[str, str]:
+        gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
         downloaded = await self.api.download(
             hostname=device.fqdn,
             paths=files,
             host_params=HostParams(
                 credentials=self.conf.make_dev_credentials(),
-                device="pc",
+                device=gnetcli_device,
                 ip=ip,
             ),
         )
