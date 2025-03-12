@@ -387,6 +387,19 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         res.add_results(results={dev.fqdn: dev_res for (dev, _), dev_res in zip(deploy_items, result)})
         return res
 
+    def _render_cmd_res(self, res: pb.CMDResult) -> str:
+        if res.trace:
+            trace_str = "\n" + format_trace(res.trace)
+        else:
+            trace_str = ""
+        try:
+            error_str = res.error.decode("utf-8")
+        except UnicodeDecodeError:
+            error_str = str(res.error)
+        if error_str:
+            error_str = "\n" + error_str
+        return f"out: {res.out_str}\nstatus: {res.status}{error_str}{trace_str}"
+
     async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions, progress_bar: ProgressBar | None = None) -> tuple[list[Exception], list[pb.CMDResult]]:
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
@@ -407,6 +420,8 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                 total_cmds += len(reload_cmds[file])
             run_cmds = CommandList()
             files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
+            filelist = "".join(f"- {f}\n" for f in files)
+            progress_bar.add_content(device.fqdn, f">>> Uploading files: \n{filelist}\n\n")
             await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
         else:
             total_cmds = len(cmds)
@@ -415,9 +430,12 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         done_cmds = 0
         async with self.api.cmd_session(hostname=device.fqdn) as sess:
             result: List[pb.CMDResult] = []
+            if run_cmds:
+                progress_bar.add_content(device.fqdn, f">>> Running commands:")
             for cmd in run_cmds:
                 if progress_bar:
                     progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=cmd.cmd)
+                progress_bar.add_content(device.fqdn, f"cmd: {cmd.cmd}")
                 try:
                     res = await sess.cmd(
                         cmd=cmd.cmd,
@@ -433,8 +451,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         break  # we can't exec subsequent cmds
                     raise e
                 if progress_bar:
-                    tr = format_trace(res.trace)
-                    progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}\n{tr}")
+                    progress_bar.add_content(device.fqdn, self._render_cmd_res(res))
                 done_cmds += 1
                 if res.status != 0:
                     if cmd.suppress_nonzero:
@@ -446,11 +463,14 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                 if progress_bar:
                     progress_bar.set_progress(device.fqdn, done_cmds, total_cmds)
             if do_reload:
+                if reload_cmds:
+                    progress_bar.add_content(device.fqdn, f">>> Running reload commands:")
                 for file, cmds in reload_cmds.items():
                     _logger.debug("reload %s %s", file, cmds)
                     for cmd in cmds:
                         if progress_bar:
                             progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=f"{file}:{cmd.cmd}")
+                        progress_bar.add_content(device.fqdn, f"Reload {file}: {cmd.cmd}")
                         res = await sess.cmd(
                             cmd=cmd.cmd,
                             cmd_timeout=cmd.timeout,
@@ -459,7 +479,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         )
                         done_cmds += 1
                         if progress_bar:
-                            progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}")
+                            progress_bar.add_content(device.fqdn, self._render_cmd_res(res))
                         if res.status != 0 and cmd.suppress_nonzero:
                             if progress_bar:
                                 progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
