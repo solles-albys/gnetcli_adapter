@@ -2,7 +2,6 @@ import asyncio
 import json
 import subprocess
 import time
-from abc import ABC
 
 import annet.annlib.command
 
@@ -16,8 +15,9 @@ from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
 
-from gnetcli_adapter.progress_tracker import ProgressTracker, ProgressBarTracker, FileProgressTracker, \
-    LogProgressTracker
+from gnetcli_adapter.progress_tracker import (
+    ProgressTracker, ProgressBarTracker, FileProgressTracker, LogProgressTracker, CompositeTracker,
+)
 from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File, GnetcliSessionCmd
 from gnetclisdk.exceptions import EOFError
 import gnetclisdk.proto.server_pb2 as pb
@@ -223,7 +223,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return "gnetcli"
 
     @classmethod
-    def with_config(cls, **kwargs: Dict[str, Any]) -> Fetcher:
+    def with_config(cls, **kwargs: Any) -> Fetcher:
         return cls(**kwargs)
 
     async def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
@@ -349,6 +349,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
         server_conf: Optional[str] = DEFAULT_GNETCLI_SERVER_CONF,
+        logs_dir: Optional[str] = None,
     ):
         conf_args = {
             "login": login,
@@ -362,14 +363,15 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         }
         self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
+        self.logs_dir = logs_dir
 
     @classmethod
     def name(cls) -> str:
         return "gnetcli"
 
     @classmethod
-    def with_config(cls, **kwargs: Dict[str, Any]) -> DeployDriver:
-        return GnetcliDeployer(**kwargs)
+    def with_config(cls, **kwargs: Any) -> DeployDriver:
+        return cls(**kwargs)
 
     async def bulk_deploy(self, deploy_cmds: dict[Device, CommandList], args: DeployOptions, progress_bar: ProgressBar | None = None) -> DeployResult:
         if progress_bar:
@@ -402,11 +404,12 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         return run_cmds
 
     def _init_progress_tracker(self, device: Device, progress_bar: ProgressBar | None) -> ProgressTracker:
-        if not progress_bar:
-            return ProgressTracker()
-        return LogProgressTracker(device)
-        return FileProgressTracker(device, ".")
-        return ProgressBarTracker(device, progress_bar)
+        tracker = CompositeTracker(LogProgressTracker(device))
+        if progress_bar:
+            tracker.add_tracker(ProgressBarTracker(device, progress_bar))
+        if self.logs_dir:
+            tracker.add_tracker(FileProgressTracker(device, self.logs_dir))
+        return tracker
 
     async def deploy(
             self,
@@ -507,7 +510,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
                     result.append(res)
         if seen_exc:
-            tracker.finish(f"Seen exceptions")
+            tracker.finish("Seen exceptions")
         else:
             tracker.finish("All done")
         return seen_exc, result

@@ -2,6 +2,7 @@ import os.path
 from logging import getLogger
 
 import os
+from contextlib import ExitStack
 from datetime import datetime
 from typing import TextIO
 
@@ -136,12 +137,20 @@ class FileProgressTracker(ProgressTracker):
         self.file: TextIO | None = None
 
     def __enter__(self) -> ProgressTracker:
-        os.makedirs(self.dirname, exist_ok=True)
-        self.file = open(self._make_file_path(), "a")
+        filepath = self._make_file_path()
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        logger.info("Writing deploy logs to file: %s", filepath)
+        self.file = open(filepath, "a")
         return self
 
     def _make_file_path(self) -> str:
-        return os.path.join(self.dirname, f"deploy-{self.device.fqdn}.log")
+        now = datetime.now()
+        datedir = f"{now:%Y-%m-%d-%H-%M}"
+        return os.path.join(
+            self.dirname,
+            datedir,
+            f"{self.device.fqdn}_{now.timestamp():.0f}",
+        )
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.file.close()
@@ -199,3 +208,52 @@ class LogProgressTracker(ProgressTracker):
 
     def finish(self, notification: str) -> None:
         logger.info(f"{self.fqdn} - finished - {notification}")
+
+
+class CompositeTracker(ProgressTracker):
+    def __init__(self, *trackers: ProgressTracker) -> None:
+        self.trackers = list(trackers)
+        self.stack = ExitStack()
+
+    def __enter__(self):
+        for tracker in self.trackers:
+            self.stack.enter_context(tracker)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stack.close()
+
+    def add_tracker(self, tracker: ProgressTracker) -> None:
+        self.trackers.append(tracker)
+
+    def start_group(self, group_name: str) -> None:
+        for tracker in self.trackers:
+            tracker.start_group(group_name)
+
+    def set_total(self, total: int) -> None:
+        for tracker in self.trackers:
+            tracker.set_total(total)
+
+    def upload_files(self, files: list[str]) -> None:
+        for tracker in self.trackers:
+            tracker.upload_files(files)
+
+    def run_command(self, cmd: str) -> None:
+        for tracker in self.trackers:
+            tracker.run_command(cmd)
+
+    def run_reload_command(self, file: str, cmd: str):
+        for tracker in self.trackers:
+            tracker.run_reload_command(file, cmd)
+
+    def command_done_ok(self, output: pb.CMDResult) -> None:
+        for tracker in self.trackers:
+            tracker.command_done_ok(output)
+
+    def command_done_error(self, error: str) -> None:
+        for tracker in self.trackers:
+            tracker.command_done_error(error)
+
+    def finish(self, notification: str) -> None:
+        for tracker in self.trackers:
+            tracker.finish(notification)
