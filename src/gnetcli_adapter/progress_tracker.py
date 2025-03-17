@@ -44,7 +44,10 @@ class ProgressTracker:
     def command_done_error(self, error: str) -> None:
         pass
 
-    def finish(self, notification: str) -> None:
+    def finish_ok(self, notification: str) -> None:
+        pass
+
+    def finish_err(self, notification: str) -> None:
         pass
 
 
@@ -133,9 +136,13 @@ class ProgressBarTracker(ProgressTracker):
             "Error: " + self.last_cmd,
         )
 
-    def finish(self, notification: str) -> None:
+    def finish_ok(self, notification: str) -> None:
         self.done_steps = self.total_steps
-        self.progress_bar.set_exception(self.tile, notification, self.last_cmd, self.total_steps)
+        self.progress_bar.set_progress(self.tile,self.done_steps, self.total_steps, suffix=notification)
+
+    def finish_err(self, notification: str) -> None:
+        self.done_steps = self.total_steps
+        self.progress_bar.set_exception(self.tile, notification, "", self.total_steps)
 
 
 class FileProgressTracker(ProgressTracker):
@@ -192,8 +199,12 @@ class FileProgressTracker(ProgressTracker):
     def command_done_error(self, error: str) -> None:
         self._log(f"Error: {error}")
 
-    def finish(self, notification: str) -> None:
-        self._log("Finished: " + notification)
+    def finish_ok(self, notification: str) -> None:
+        self._log("Finished with success: " + notification)
+
+    def finish_err(self, notification: str) -> None:
+        self._log("Finished with failure: " + notification)
+
 
 
 class LogProgressTracker(ProgressTracker):
@@ -220,8 +231,12 @@ class LogProgressTracker(ProgressTracker):
     def command_done_error(self, error: str) -> None:
         logger.error(f"{self.fqdn} - {error}")
 
-    def finish(self, notification: str) -> None:
-        logger.info(f"{self.fqdn} - finished - {notification}")
+    def finish_ok(self, notification: str) -> None:
+        logger.info(f"{self.fqdn} - finished with success - {notification}")
+
+    def finish_err(self, notification: str) -> None:
+        logger.info(f"{self.fqdn} - finished with failure - {notification}")
+
 
 
 class CompositeTracker(ProgressTracker):
@@ -272,6 +287,10 @@ class CompositeTracker(ProgressTracker):
         for tracker in self.trackers:
             tracker.command_done_error(error)
 
-    def finish(self, notification: str) -> None:
+    def finish_ok(self, notification: str) -> None:
         for tracker in self.trackers:
-            tracker.finish(notification)
+            tracker.finish_ok(notification)
+
+    def finish_err(self, notification: str) -> None:
+        for tracker in self.trackers:
+            tracker.finish_err(notification)
