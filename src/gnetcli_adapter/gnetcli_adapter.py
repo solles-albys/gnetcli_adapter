@@ -397,10 +397,14 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=True) for cmd in cmd.splitlines()])
         return reload_cmds
 
-    def _get_total(self, cmds: CommandList, reload_cmds: dict[str, CommandList]) -> int:
+    def _get_total(
+            self, cmds: CommandList, reload_cmds: dict[str, CommandList], files: dict[str, File],
+    ) -> int:
         run_cmds = len(cmds)
         for cmds in reload_cmds.values():
             run_cmds += len(cmds)
+        if files:
+            run_cmds += 1
         return run_cmds
 
     def _init_progress_tracker(self, device: Device, progress_bar: ProgressBar | None) -> ProgressTracker:
@@ -436,9 +440,11 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             reload_cmds = {}
 
         with self._init_progress_tracker(device, progress_bar) as tracker:
+            tracker.set_total(self._get_total(run_cmds, reload_cmds, files))
             if files:
                 tracker.upload_files(list(files))
                 await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
+                tracker.files_uploaded()
 
             async with self.api.cmd_session(hostname=device.fqdn) as sess:
                 return await self._deploy_cmds(
@@ -457,8 +463,6 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             tracker: ProgressTracker,
             do_reload: bool,
     ):
-        tracker.set_total(self._get_total(run_cmds, reload_cmds))
-
         seen_exc: list[Exception] = []
         result: List[pb.CMDResult] = []
         if run_cmds:

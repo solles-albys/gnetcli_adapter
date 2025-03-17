@@ -29,6 +29,9 @@ class ProgressTracker:
     def upload_files(self, files: list[str]) -> None:
         pass
 
+    def files_uploaded(self) -> None:
+        pass
+
     def run_command(self, cmd: str) -> None:
         pass
 
@@ -88,6 +91,11 @@ class ProgressBarTracker(ProgressTracker):
     def upload_files(self, files: list[str]) -> None:
         filelist = "".join(f"- {f}\n" for f in files)
         self.progress_bar.add_content(self.tile, f"=== Uploading files ===\n{filelist}")
+
+    def files_uploaded(self) -> None:
+        self.done_steps += 1
+        self.progress_bar.add_content(self.tile, f"=== Files uploaded ===\n")
+        self.progress_bar.set_progress(self.tile, self.done_steps, self.total_steps)
 
     def run_command(self, cmd: str):
         self.progress_bar.add_content(self.tile, f"cmd: {cmd}")
@@ -165,8 +173,11 @@ class FileProgressTracker(ProgressTracker):
         pass
 
     def upload_files(self, files: list[str]) -> None:
-        filelist = "".join(f"- {f}\n" for f in files)
+        filelist = "\n".join(f"- {f}" for f in files)
         self._log(f"=== Uploading files ===\n{filelist}")
+
+    def files_uploaded(self) -> None:
+        self._log(f"=== Files uploaded ===")
 
     def run_command(self, cmd: str) -> None:
         self._log(f"cmd: {cmd}")
@@ -194,6 +205,9 @@ class LogProgressTracker(ProgressTracker):
 
     def start_group(self, group_name: str) -> None:
         logger.info(f"{self.fqdn} - {group_name}")
+
+    def upload_files(self, files: list[str]) -> None:
+        logger.info(f"{self.fqdn} - upload %s files", len(files))
 
     def command_done_ok(self, output: pb.CMDResult) -> None:
         if output.error:
@@ -237,6 +251,10 @@ class CompositeTracker(ProgressTracker):
     def upload_files(self, files: list[str]) -> None:
         for tracker in self.trackers:
             tracker.upload_files(files)
+
+    def files_uploaded(self) -> None:
+        for tracker in self.trackers:
+            tracker.files_uploaded()
 
     def run_command(self, cmd: str) -> None:
         for tracker in self.trackers:
