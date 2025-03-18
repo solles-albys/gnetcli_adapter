@@ -481,11 +481,11 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
 
         old_group_name = ""
         async with self.api.cmd_session(hostname=device.fqdn) as session:
-            for group_name, cmdlist in command_groups:
+            for group_number, (group_name, cmdlist) in enumerate(command_groups):
                 if group_name != old_group_name:
                     tracker.start_group(group_name)
                     old_group_name = group_name
-                for cmd in cmdlist:
+                for cmd_number, cmd in enumerate(cmdlist):
                     tracker.run_command(cmd.cmd)
                     try:
                         res = await session.cmd(
@@ -496,11 +496,16 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                             trace=True,
                         )
                     except EOFError as e:
-                        # we can't exec subsequent cmds
+                        # we can't execute subsequent commands
                         if cmd.suppress_eof:
+                            # some commands left
+                            if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmd):
+                                tracker.command_done_error("EOF detected before all commands executed.")
+                                seen_exc.append(Exception("EOF detected before all commands executed."))
                             tracker.command_done_error("Suppressed EOF")
                             return seen_exc, results
                         seen_exc.append(e)
+                        tracker.command_done_error("Unexpected EOFError")
                         return seen_exc, results
                     if res.status == 0:
                         tracker.command_done_ok(res)
