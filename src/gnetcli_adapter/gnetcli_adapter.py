@@ -1,3 +1,5 @@
+import traceback
+
 import asyncio
 import json
 import subprocess
@@ -14,7 +16,11 @@ from annet.rulebook import common
 from annet.connectors import AdapterWithConfig, AdapterWithName
 from typing import Dict, List, Any, Optional, Tuple
 from annet.storage import Device
-from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File
+
+from gnetcli_adapter.progress_tracker import (
+    ProgressTracker, ProgressBarTracker, FileProgressTracker, LogProgressTracker, CompositeTracker,
+)
+from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File, GnetcliSessionCmd
 from gnetclisdk.exceptions import EOFError
 import gnetclisdk.proto.server_pb2 as pb
 from pydantic import Field, field_validator, FieldValidationInfo
@@ -219,7 +225,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         return "gnetcli"
 
     @classmethod
-    def with_config(cls, **kwargs: Dict[str, Any]) -> Fetcher:
+    def with_config(cls, **kwargs: Any) -> Fetcher:
         return cls(**kwargs)
 
     async def fetch_packages(self, devices: List[Device], processes: int = 1, max_slots: int = 0):
@@ -333,16 +339,6 @@ def make_api(conf: AppSettings) -> Gnetcli:
     )
     return api
 
-def format_trace(trace: list[pb.CMDTraceItem]) -> str:
-    res:list[str] = []
-    for t in trace:
-        op = "unknown" # TODO: get from pb
-        if t.operation == 2:
-            op = "write"
-        elif t.operation == 3:
-            op = "read"
-        res.append(f"{op}={t.data}")
-    return "\n".join(res)
 
 class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
     def __init__(
@@ -355,6 +351,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         ssh_agent_enabled: bool = True,
         server_path: Optional[str] = None,
         server_conf: Optional[str] = DEFAULT_GNETCLI_SERVER_CONF,
+        logs_dir: Optional[str] = None,
     ):
         conf_args = {
             "login": login,
@@ -368,14 +365,15 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         }
         self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
+        self.logs_dir = logs_dir
 
     @classmethod
     def name(cls) -> str:
         return "gnetcli"
 
     @classmethod
-    def with_config(cls, **kwargs: Dict[str, Any]) -> DeployDriver:
-        return GnetcliDeployer(**kwargs)
+    def with_config(cls, **kwargs: Any) -> DeployDriver:
+        return cls(**kwargs)
 
     async def bulk_deploy(self, deploy_cmds: dict[Device, CommandList], args: DeployOptions, progress_bar: ProgressBar | None = None) -> DeployResult:
         if progress_bar:
@@ -387,7 +385,45 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         res.add_results(results={dev.fqdn: dev_res for (dev, _), dev_res in zip(deploy_items, result)})
         return res
 
-    async def deploy(self, device: Device, cmds: CommandList, args: DeployOptions, progress_bar: ProgressBar | None = None) -> tuple[list[Exception], list[pb.CMDResult]]:
+    def _get_files(self, cmds: dict[str, Any]) -> dict[str, File]:
+        return {
+            file: File(content=content, status=None)
+            for file, content in cmds["files"].items()
+        }
+
+    def _get_reload_cmds(self, cmds: dict[str, Any]):
+        reload_cmds: dict[str, CommandList] = {}
+        for file, cmd in cmds["cmds"].items():
+            if isinstance(cmd, bytes):
+                cmd = cmd.decode()
+            reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=True) for cmd in cmd.splitlines()])
+        return reload_cmds
+
+    def _get_total(
+            self, command_groups: list[tuple[str, CommandList]], files: dict[str, File],
+    ) -> int:
+        run_cmds = 0
+        for _, cmds in command_groups:
+            run_cmds += len(cmds)
+        if files:
+            run_cmds += 1
+        return run_cmds
+
+    def _init_progress_tracker(self, device: Device, progress_bar: ProgressBar | None) -> ProgressTracker:
+        tracker = CompositeTracker(LogProgressTracker(device))
+        if progress_bar:
+            tracker.add_tracker(ProgressBarTracker(device, progress_bar))
+        if self.logs_dir:
+            tracker.add_tracker(FileProgressTracker(device, self.logs_dir))
+        return tracker
+
+    async def deploy(
+            self,
+            device: Device,
+            cmds: CommandList,
+            args: DeployOptions,
+            progress_bar: ProgressBar | None = None,
+    ) -> tuple[list[Exception], list[pb.CMDResult]]:
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
         host_params = HostParams(
@@ -395,85 +431,95 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             device=gnetcli_device,
             ip=ip,
         )
-        do_reload: bool = args.entire_reload.value == "yes"
-        seen_exc: list[Exception] = []
-        reload_cmds: dict[str, CommandList] = {}
-        total_cmds = 0
+        command_groups: list[tuple[str, CommandList]]= []
         if isinstance(cmds, dict): # PC
-            for file, cmd in cmds["cmds"].items():
-                if isinstance(cmd, bytes):
-                    cmd = cmd.decode()
-                reload_cmds[file] = CommandList([Command(cmd, suppress_nonzero=True) for cmd in cmd.splitlines()])
-                total_cmds += len(reload_cmds[file])
-            run_cmds = CommandList()
-            files: Dict[str, File] = {file: File(content=content, status=None) for file, content in cmds["files"].items()}
-            await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
+            files = self._get_files(cmds)
+            if args.entire_reload.value == "yes":
+                for file, cmdlist in self._get_reload_cmds(cmds).items():
+                    command_groups.append((f"Reload {file}", cmdlist))
         else:
-            total_cmds = len(cmds)
-            run_cmds = cmds
+            files = {}
+            # treat each command as a group
+            for cmd in cmds:
+                command_groups.append(("Run command", CommandList([cmd])))
 
-        done_cmds = 0
-        async with self.api.cmd_session(hostname=device.fqdn) as sess:
-            result: List[pb.CMDResult] = []
-            for cmd in run_cmds:
-                if progress_bar:
-                    progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=cmd.cmd)
-                try:
-                    res = await sess.cmd(
-                        cmd=cmd.cmd,
-                        cmd_timeout=cmd.timeout,
-                        host_params=host_params,
-                        qa=parse_annet_qa(cmd.questions or []),
-                        trace=True,
-                    )
-                except EOFError as e:
-                    if cmd.suppress_eof:
-                        if progress_bar:
-                            progress_bar.set_progress(device.fqdn, total_cmds, total_cmds, suffix=f"suppressed EOF: {cmd.cmd}")
-                        break  # we can't exec subsequent cmds
-                    raise e
-                if progress_bar:
-                    tr = format_trace(res.trace)
-                    progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}\n{tr}")
-                done_cmds += 1
-                if res.status != 0:
-                    if cmd.suppress_nonzero:
-                        continue
-                    if progress_bar:
-                        progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
-                    raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
-                result.append(res)
-                if progress_bar:
-                    progress_bar.set_progress(device.fqdn, done_cmds, total_cmds)
-            if do_reload:
-                for file, cmds in reload_cmds.items():
-                    _logger.debug("reload %s %s", file, cmds)
-                    for cmd in cmds:
-                        if progress_bar:
-                            progress_bar.set_progress(device.fqdn, done_cmds, total_cmds, suffix=f"{file}:{cmd.cmd}")
-                        res = await sess.cmd(
+        with self._init_progress_tracker(device, progress_bar) as tracker:
+            tracker.set_total(self._get_total(command_groups, files))
+            try:
+                seen_exc, results = await self._deploy(
+                    device=device,
+                    host_params=host_params,
+                    command_groups=command_groups,
+                    tracker=tracker,
+                    files=files,
+                )
+            except Exception as e:
+                trace = traceback.format_exc()
+                tracker.command_done_error(trace)
+                seen_exc = [e]
+                results = []
+            if seen_exc:
+                tracker.finish_err(f"Seen {len(seen_exc)} exceptions")
+            else:
+                tracker.finish_ok("All done")
+            return seen_exc, results
+
+    async def _deploy(
+            self,
+            device: Device,
+            host_params: HostParams,
+            command_groups: list[tuple[str, CommandList]],
+            files: dict[str, File],
+            tracker: ProgressTracker,
+    ) -> tuple[list[Exception], list[pb.CMDResult]]:
+        seen_exc = []
+        results = []
+        if files:
+            tracker.upload_files(list(files))
+            await self.api.upload(hostname=device.fqdn, files=files, host_params=host_params)
+            tracker.files_uploaded()
+
+        old_group_name = ""
+        async with self.api.cmd_session(hostname=device.fqdn) as session:
+            for group_number, (group_name, cmdlist) in enumerate(command_groups):
+                if group_name != old_group_name:
+                    tracker.start_group(group_name)
+                    old_group_name = group_name
+                for cmd_number, cmd in enumerate(cmdlist):
+                    tracker.run_command(cmd.cmd)
+                    try:
+                        res = await session.cmd(
                             cmd=cmd.cmd,
                             cmd_timeout=cmd.timeout,
                             host_params=host_params,
                             qa=parse_annet_qa(cmd.questions or []),
+                            trace=True,
                         )
-                        done_cmds += 1
-                        if progress_bar:
-                            progress_bar.set_content(device.fqdn, f"cmd={cmd.cmd} out={res.out_str} status={res.status}")
-                        if res.status != 0 and cmd.suppress_nonzero:
-                            if progress_bar:
-                                progress_bar.set_exception(device.fqdn, cmd.cmd, str(res.error), total_cmds)
-                            if cmd.suppress_nonzero:
-                                done_cmds += 1
-                                seen_exc.append(Exception("cmd %s error %s status %s", cmd, res.error, res.status))
-                                break # break on command for current file
-                            raise Exception("cmd %s error %s status %s", cmd, res.error, res.status)
-                        result.append(res)
-                if reload_cmds and progress_bar:
-                    progress_bar.set_progress(device.fqdn, total_cmds, total_cmds)
-            if seen_exc and progress_bar:
-                progress_bar.set_exception(device.fqdn, "seen exception", str(seen_exc), total_cmds)
-            return seen_exc, result
+                    except EOFError as e:
+                        # we can't execute subsequent commands
+                        if cmd.suppress_eof:
+                            # some commands left
+                            if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmd):
+                                tracker.command_done_error("EOF detected before all commands executed.")
+                                seen_exc.append(Exception("EOF detected before all commands executed."))
+                            tracker.command_done_error("Suppressed EOF")
+                            return seen_exc, results
+                        seen_exc.append(e)
+                        tracker.command_done_error("Unexpected EOFError")
+                        return seen_exc, results
+                    if res.status == 0:
+                        tracker.command_done_ok(res)
+                        results.append(res)
+                    else:
+                        e = Exception("cmd %s error %s status %s", cmd, res.error, res.status)
+                        seen_exc.append(e)
+                        if cmd.suppress_nonzero:
+                            tracker.command_done_ok(res)
+                            break  # go to next command group
+                        else:
+                            tracker.command_done_error(res.error.decode())
+                            return seen_exc, results
+        return seen_exc, results
 
     def apply_deploy_rulebook(
         self,
