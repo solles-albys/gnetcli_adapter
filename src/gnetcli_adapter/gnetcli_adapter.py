@@ -188,6 +188,8 @@ def run_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CO
                 else:
                     if data.get("msg") == "init tcp socket":
                         _local_gnetcli_url = data.get("address")
+                    if data.get("msg") == "init unix socket":
+                        _local_gnetcli_url = "unix:" + data.get("path")
                     if data.get("level") == "panic":
                         _logger.error("gnetcli error %s", data)
     _logger.debug("set gnetcli server exit code %s", proc.returncode)
