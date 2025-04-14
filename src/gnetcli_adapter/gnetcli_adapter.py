@@ -501,7 +501,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         # we can't execute subsequent commands
                         if cmd.suppress_eof:
                             # some commands left
-                            if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmd):
+                            if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmdlist):
                                 tracker.command_done_error("EOF detected before all commands executed.")
                                 seen_exc.append(Exception("EOF detected before all commands executed."))
                             tracker.command_done_error("Suppressed EOF")
