@@ -504,7 +504,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                             if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmdlist):
                                 tracker.command_done_error("EOF detected before all commands executed.")
                                 seen_exc.append(Exception("EOF detected before all commands executed."))
-                            tracker.command_done_error("Suppressed EOF")
+                            tracker.command_done_error_suppressed("Suppressed EOF")
                             return seen_exc, results
                         seen_exc.append(e)
                         tracker.command_done_error("Unexpected EOFError")
