@@ -44,6 +44,9 @@ class ProgressTracker:
     def command_done_error(self, error: str) -> None:
         pass
 
+    def command_done_error_suppressed(self, error: str) -> None:
+        pass
+
     def finish_ok(self, notification: str) -> None:
         pass
 
@@ -126,7 +129,6 @@ class ProgressBarTracker(ProgressTracker):
         )
 
     def command_done_error(self, error: str) -> None:
-        logger.error(error)
         self.done_steps += 1
         self.progress_bar.add_content(self.tile, error)
         self.progress_bar.set_progress(
@@ -134,6 +136,16 @@ class ProgressBarTracker(ProgressTracker):
             self.done_steps,
             self.total_steps,
             "Error: " + self.last_cmd,
+        )
+
+    def command_done_error_suppressed(self, error: str) -> None:
+        self.done_steps += 1
+        self.progress_bar.add_content(self.tile, error)
+        self.progress_bar.set_progress(
+            self.tile,
+            self.done_steps,
+            self.total_steps,
+            "Error (suppressed): " + self.last_cmd,
         )
 
     def finish_ok(self, notification: str) -> None:
@@ -199,6 +211,9 @@ class FileProgressTracker(ProgressTracker):
     def command_done_error(self, error: str) -> None:
         self._log(f"Error: {error}")
 
+    def command_done_error_suppressed(self, error: str) -> None:
+        self._log(f"Error (suppressed): {error}")
+
     def finish_ok(self, notification: str) -> None:
         self._log("Finished with success: " + notification)
 
@@ -230,6 +245,9 @@ class LogProgressTracker(ProgressTracker):
 
     def command_done_error(self, error: str) -> None:
         logger.error(f"{self.fqdn} - {error}")
+
+    def command_done_error_suppressed(self, error: str) -> None:
+        logger.info(f"{self.fqdn} - {error}")
 
     def finish_ok(self, notification: str) -> None:
         logger.info(f"{self.fqdn} - finished with success - {notification}")
@@ -286,6 +304,10 @@ class CompositeTracker(ProgressTracker):
     def command_done_error(self, error: str) -> None:
         for tracker in self.trackers:
             tracker.command_done_error(error)
+
+    def command_done_error_suppressed(self, error: str) -> None:
+        for tracker in self.trackers:
+            tracker.command_done_error_suppressed(error)
 
     def finish_ok(self, notification: str) -> None:
         for tracker in self.trackers:
