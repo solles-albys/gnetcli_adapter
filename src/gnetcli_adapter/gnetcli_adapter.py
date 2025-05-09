@@ -533,8 +533,10 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         res = apply_deploy_rulebook(hw=hw, cmd_paths=cmd_paths, do_finalize=do_finalize, do_commit=do_commit)
         return res
 
-    def build_configuration_cmdlist(self, hw: HardwareView, do_finalize: bool = True, do_commit: bool = True):
-        res = common.apply(hw, do_commit=do_commit, do_finalize=do_finalize)
+    def build_configuration_cmdlist(
+        self, hw: HardwareView, do_finalize: bool = True, do_commit: bool = True, path: str = None,
+    ):
+        res = common.apply(hw, do_commit=do_commit, do_finalize=do_finalize, path=path)
         return res
 
     def build_exit_cmdlist(self, hw: HardwareView) -> CommandList:
