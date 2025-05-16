@@ -1,37 +1,51 @@
-import traceback
-
 import asyncio
+import atexit
+import base64
 import json
+import logging
+import os.path
+import shutil
 import subprocess
+import threading
 import time
+import traceback
+from typing import Any, Dict, List, Optional, Tuple
 
 import annet.annlib.command
-
-from annet.deploy import Fetcher, DeployDriver, DeployOptions, DeployResult, apply_deploy_rulebook, ProgressBar
+import gnetclisdk.proto.server_pb2 as pb
+from annet.adapters.netbox.common.models import NetboxDevice
 from annet.annlib.command import Command, CommandList
 from annet.annlib.netdev.views.hardware import HardwareView
-from annet.adapters.netbox.common.models import NetboxDevice
-from annet.rulebook import common
-
 from annet.connectors import AdapterWithConfig, AdapterWithName
-from typing import Dict, List, Any, Optional, Tuple
-from annet.storage import Device
-
-from gnetcli_adapter.progress_tracker import (
-    ProgressTracker, ProgressBarTracker, FileProgressTracker, LogProgressTracker, CompositeTracker,
+from annet.deploy import (
+    DeployDriver,
+    DeployOptions,
+    DeployResult,
+    Fetcher,
+    ProgressBar,
+    apply_deploy_rulebook,
 )
-from gnetclisdk.client import Credentials, Gnetcli, HostParams, QA, File, GnetcliSessionCmd
+from annet.rulebook import common
+from annet.storage import Device
+from gnetcli_adapter.progress_tracker import (
+    CompositeTracker,
+    FileProgressTracker,
+    LogProgressTracker,
+    ProgressBarTracker,
+    ProgressTracker,
+)
+from gnetclisdk.client import (
+    QA,
+    Credentials,
+    File,
+    Gnetcli,
+    GnetcliSessionCmd,
+    HostParams,
+)
 from gnetclisdk.exceptions import EOFError
-import gnetclisdk.proto.server_pb2 as pb
-from pydantic import Field, field_validator, FieldValidationInfo
+from pydantic import Field, FieldValidationInfo, field_validator
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import base64
-import logging
-import threading
-import atexit
-import shutil
-import os.path
 
 breed_to_device = {
     "routeros": "ros",
@@ -109,7 +123,7 @@ class AppSettings(BaseSettings):
 async def get_config(breed: str) -> List[str]:
     if breed == "routeros":
         return ["/export verbose", "/user export verbose", "/file print terse detail", "/user ssh-keys print terse"]
-    elif breed.startswith("ios") or breed.startswith("bcom") or breed.startswith("eltex"):
+    elif breed.startswith("ios") or breed.startswith("bcom") or breed.startswith("eltex") or breed.startswith("nxos"):
         return ["show running-config"]
     elif breed.startswith("jun"):
         return ["show configuration"]
@@ -123,8 +137,7 @@ async def get_config(breed: str) -> List[str]:
 def check_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CONF):
     global _local_gnetcli
     if not _local_gnetcli:
-        t = threading.Thread(target=run_gnetcli_server,
-                             kwargs={"server_path": server_path, "config": config})
+        t = threading.Thread(target=run_gnetcli_server, kwargs={"server_path": server_path, "config": config})
         t.daemon = True
         t.start()
         time.sleep(1)
@@ -143,12 +156,22 @@ atexit.register(cleanup)
 
 def get_device_ip(dev: Device) -> Optional[str]:
     if isinstance(dev, NetboxDevice):
+        if dev.connect_details and dev.connect_details.fqdn:
+            return dev.connect_details.fqdn
         if dev.primary_ip:
             return dev.primary_ip.address.split("/")[0]
         for iface in dev.interfaces:
             for ip in iface.ip_addresses:
                 return ip.address.split("/")[0]
     return None
+
+
+def get_device_port(dev: Device) -> int:
+    if isinstance(dev, NetboxDevice):
+        if dev.connect_details and dev.connect_details.port:
+            return dev.connect_details.port
+
+    return 22
 
 
 def run_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CONF):
@@ -162,7 +185,7 @@ def run_gnetcli_server(server_path: str, config: str = DEFAULT_GNETCLI_SERVER_CO
     try:
         proc = subprocess.Popen(
             [gnetcli_abs_path, "--conf-file", "-"],
-            stdout=subprocess.DEVNULL, # we do not read stdout
+            stdout=subprocess.DEVNULL,  # we do not read stdout
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
             bufsize=1,
@@ -219,7 +242,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
             "server_conf": server_conf,
             "ssh_agent_enabled": ssh_agent_enabled,
         }
-        self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
+        self.conf = AppSettings(**{k: v for k, v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
 
     @classmethod
@@ -236,11 +259,12 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         # TODO: implement fetch_packages
         return {}, {}
 
-    async def fetch(self,
-                    devices: List[Device],
-                    files_to_download: Optional[Dict[Device, List[str]]] = None,
-                    processes: int = 1,
-                    max_slots: int = 0,
+    async def fetch(
+        self,
+        devices: List[Device],
+        files_to_download: Optional[Dict[Device, List[str]]] = None,
+        processes: int = 1,
+        max_slots: int = 0,
     ):
         running = {}
         failed_running = {}
@@ -276,6 +300,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         dev_result = []
         ip = get_device_ip(device)
+        port = get_device_port(device)
         for cmd in cmds:
             res = await self.api.cmd(
                 hostname=device.fqdn,
@@ -284,6 +309,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                     credentials=self.conf.make_dev_credentials(),
                     device=gnetcli_device,
                     ip=ip,
+                    port=port,
                 ),
             )
             if res.status != 0:
@@ -294,6 +320,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
     async def adownload_dev(self, device: Device, files: List[str]) -> Dict[str, str]:
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
+        port = get_device_port(device)
         downloaded = await self.api.download(
             hostname=device.fqdn,
             paths=files,
@@ -301,6 +328,7 @@ class GnetcliFetcher(Fetcher, AdapterWithConfig, AdapterWithName):
                 credentials=self.conf.make_dev_credentials(),
                 device=gnetcli_device,
                 ip=ip,
+                port=port,
             ),
         )
         res: Dict[str, str] = {}
@@ -365,7 +393,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             "server_conf": server_conf,
             "ssh_agent_enabled": ssh_agent_enabled,
         }
-        self.conf = AppSettings(**{k: v for k,v in conf_args.items() if v is not None})
+        self.conf = AppSettings(**{k: v for k, v in conf_args.items() if v is not None})
         self.api = make_api(self.conf)
         self.logs_dir = logs_dir
 
@@ -377,21 +405,22 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
     def with_config(cls, **kwargs: Any) -> DeployDriver:
         return cls(**kwargs)
 
-    async def bulk_deploy(self, deploy_cmds: dict[Device, CommandList], args: DeployOptions, progress_bar: ProgressBar | None = None) -> DeployResult:
+    async def bulk_deploy(
+        self, deploy_cmds: dict[Device, CommandList], args: DeployOptions, progress_bar: ProgressBar | None = None
+    ) -> DeployResult:
         if progress_bar:
             for host, cmds in deploy_cmds.items():
                 progress_bar.set_progress(host.fqdn, 0, len(cmds))
         deploy_items = deploy_cmds.items()
-        result = await asyncio.gather(*[asyncio.Task(self.deploy(device, cmds, args, progress_bar)) for device, cmds in deploy_items])
+        result = await asyncio.gather(
+            *[asyncio.Task(self.deploy(device, cmds, args, progress_bar)) for device, cmds in deploy_items]
+        )
         res = DeployResult(hostnames=[], results={}, durations={}, original_states={})
         res.add_results(results={dev.fqdn: dev_res for (dev, _), dev_res in zip(deploy_items, result)})
         return res
 
     def _get_files(self, cmds: dict[str, Any]) -> dict[str, File]:
-        return {
-            file: File(content=content, status=None)
-            for file, content in cmds["files"].items()
-        }
+        return {file: File(content=content, status=None) for file, content in cmds["files"].items()}
 
     def _get_reload_cmds(self, cmds: dict[str, Any]):
         reload_cmds: dict[str, CommandList] = {}
@@ -402,7 +431,9 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         return reload_cmds
 
     def _get_total(
-            self, command_groups: list[tuple[str, CommandList]], files: dict[str, File],
+        self,
+        command_groups: list[tuple[str, CommandList]],
+        files: dict[str, File],
     ) -> int:
         run_cmds = 0
         for _, cmds in command_groups:
@@ -420,21 +451,23 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         return tracker
 
     async def deploy(
-            self,
-            device: Device,
-            cmds: CommandList,
-            args: DeployOptions,
-            progress_bar: ProgressBar | None = None,
+        self,
+        device: Device,
+        cmds: CommandList,
+        args: DeployOptions,
+        progress_bar: ProgressBar | None = None,
     ) -> tuple[list[Exception], list[pb.CMDResult]]:
         gnetcli_device = breed_to_device.get(device.breed, device.breed)
         ip = get_device_ip(device)
+        port = get_device_port(device)
         host_params = HostParams(
             credentials=self.conf.make_dev_credentials(),
             device=gnetcli_device,
             ip=ip,
+            port=port,
         )
-        command_groups: list[tuple[str, CommandList]]= []
-        if isinstance(cmds, dict): # PC
+        command_groups: list[tuple[str, CommandList]] = []
+        if isinstance(cmds, dict):  # PC
             files = self._get_files(cmds)
             if args.entire_reload.value == "yes":
                 for file, cmdlist in self._get_reload_cmds(cmds).items():
@@ -467,12 +500,12 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
             return seen_exc, results
 
     async def _deploy(
-            self,
-            device: Device,
-            host_params: HostParams,
-            command_groups: list[tuple[str, CommandList]],
-            files: dict[str, File],
-            tracker: ProgressTracker,
+        self,
+        device: Device,
+        host_params: HostParams,
+        command_groups: list[tuple[str, CommandList]],
+        files: dict[str, File],
+        tracker: ProgressTracker,
     ) -> tuple[list[Exception], list[pb.CMDResult]]:
         seen_exc = []
         results = []
@@ -501,7 +534,7 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
                         # we can't execute subsequent commands
                         if cmd.suppress_eof:
                             # some commands left
-                            if group_number + 1  != len(command_groups) or cmd_number + 1 != len(cmdlist):
+                            if group_number + 1 != len(command_groups) or cmd_number + 1 != len(cmdlist):
                                 tracker.command_done_error("EOF detected before all commands executed.")
                                 seen_exc.append(Exception("EOF detected before all commands executed."))
                             tracker.command_done_error_suppressed("Suppressed EOF")
@@ -534,7 +567,11 @@ class GnetcliDeployer(DeployDriver, AdapterWithConfig, AdapterWithName):
         return res
 
     def build_configuration_cmdlist(
-        self, hw: HardwareView, do_finalize: bool = True, do_commit: bool = True, path: str = None,
+        self,
+        hw: HardwareView,
+        do_finalize: bool = True,
+        do_commit: bool = True,
+        path: str = None,
     ):
         res = common.apply(hw, do_commit=do_commit, do_finalize=do_finalize, path=path)
         return res
